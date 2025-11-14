@@ -59,8 +59,72 @@ public class ID25287575_Assignment2 {
         nextGrid = tmp;
     }
 
+    // check if cell has at least one burning neighbour (8-neighbourhood, torus)
+    private boolean hasBurningNeighbour(int row, int col, int[][] grid) {
+        for (int dr = -1; dr <= 1; dr++) {
+            for (int dc = -1; dc <= 1; dc++) {
+                if (dr == 0 && dc == 0) {
+                    continue;
+                }
+                int rr = (row + dr + size) % size;
+                int cc = (col + dc + size) % size;
+                if (grid[rr][cc] == BURNING) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    // forest fire update rule with randomness
+    private int updateCellRandom(int row, int col, int[][] grid, Random rnd) {
+        int state = grid[row][col];
+
+        if (state == BURNING) {
+            // burning tree becomes empty
+            return EMPTY;
+        }
+
+        if (state == TREE) {
+            // tree may catch fire if neighbour burning
+            if (hasBurningNeighbour(row, col, grid)) {
+                if (rnd.nextDouble() < pBurn) {
+                    return BURNING;
+                }
+            }
+            return TREE;
+        }
+
+        // empty may grow a tree
+        if (rnd.nextDouble() < pGrow) {
+            return TREE;
+        }
+        return EMPTY;
+    }
+
+    // one sequential run, returns time in ms
+    public double runSequentialOnceMs(long seed) {
+        initialize(seed);
+        Random rnd = new Random(1234L);
+
+        long tStart = System.nanoTime();
+
+        for (int step = 0; step < steps; step++) {
+            for (int r = 0; r < size; r++) {
+                for (int c = 0; c < size; c++) {
+                    int newState = updateCellRandom(r, c, currentGrid, rnd);
+                    nextGrid[r][c] = newState;
+                }
+            }
+            swapGrids();
+        }
+
+        long tEnd = System.nanoTime();
+        return (tEnd - tStart) / 1_000_000.0;
+    }
+
     public static void main(String[] args) {
-        int size = 1000;
+        int size = 50;
         int steps = 400;
         double pGrow = 0.01;
         double pBurn = 0.1;
@@ -68,8 +132,9 @@ public class ID25287575_Assignment2 {
         ID25287575_Assignment2 sim =
                 new ID25287575_Assignment2(size, steps, pGrow, pBurn);
 
-        sim.initialize(42L);
-        System.out.println("Initial forest created.");
+        long seed = 42L;
+        double t = sim.runSequentialOnceMs(seed);
+        System.out.printf("Sequential run took %.3f ms%n", t);
     }
 
 }
