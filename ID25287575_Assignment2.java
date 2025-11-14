@@ -34,6 +34,31 @@ public class ID25287575_Assignment2 {
         this.nextGrid = new int[size][size];
     }
 
+    // init forest with trees and some burning cells
+    public void initialize(long seed) {
+        Random rnd = new Random(seed);
+        for (int r = 0; r < size; r++) {
+            for (int c = 0; c < size; c++) {
+                double x = rnd.nextDouble();
+                if (x < 0.6) {
+                    currentGrid[r][c] = TREE;
+                    if (rnd.nextDouble() < 0.001) {
+                        currentGrid[r][c] = BURNING;
+                    }
+                } else {
+                    currentGrid[r][c] = EMPTY;
+                }
+            }
+        }
+    }
+
+    // swap grids
+    private void swapGrids() {
+        int[][] tmp = currentGrid;
+        currentGrid = nextGrid;
+        nextGrid = tmp;
+    }
+
     public static void main(String[] args) {
         int size = 1000;
         int steps = 400;
@@ -43,7 +68,8 @@ public class ID25287575_Assignment2 {
         ID25287575_Assignment2 sim =
                 new ID25287575_Assignment2(size, steps, pGrow, pBurn);
 
-        System.out.println("Forest sim created: size=" + size + ", steps=" + steps);
+        sim.initialize(42L);
+        System.out.println("Initial forest created.");
     }
 
 }
