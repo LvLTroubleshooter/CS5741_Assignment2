@@ -123,6 +123,168 @@ public class ID25287575_Assignment2 {
         return (tEnd - tStart) / 1_000_000.0;
     }
 
+    // average sequential: warmupruns warmup, then measuredruns runs
+    private static double averageSequentialMs(ID25287575_Assignment2 sim,
+                                              long seed,
+                                              int warmupRuns,
+                                              int measuredRuns) {
+
+        for (int i = 0; i < warmupRuns; i++) {
+            sim.runSequentialOnceMs(seed);
+        }
+
+        double sumMs = 0.0;
+        for (int i = 0; i < measuredRuns; i++) {
+            sumMs += sim.runSequentialOnceMs(seed);
+        }
+        return sumMs / measuredRuns;
+    }
+
+    // simple barrier built with synchronized + wait/notifyall
+    private static class StepBarrier {
+
+        private final int parties;
+        private int arrived = 0;
+        private int generation = 0;
+
+        StepBarrier(int parties) {
+            this.parties = parties;
+        }
+
+        public synchronized void await() throws InterruptedException {
+            int currentGen = generation;
+            arrived++;
+            if (arrived == parties) {
+                arrived = 0;
+                generation++;
+                notifyAll();
+            } else {
+                while (currentGen == generation) {
+                    wait();
+                }
+            }
+        }
+    }
+
+    // worker: data-parallel update on a block of rows
+    private static class Worker implements Runnable {
+
+        private final int id;
+        private final int startRow;
+        private final int endRow;
+        private final StepBarrier barrier;
+        private final long[][] localCounts; // [step][state]
+        private final int steps;
+        private final int size;
+        private final ID25287575_Assignment2 sim;
+        private final Random rnd;
+
+        Worker(int id,
+               int startRow,
+               int endRow,
+               StepBarrier barrier,
+               long[][] localCounts,
+               int steps,
+               int size,
+               ID25287575_Assignment2 sim,
+               long seed) {
+
+            this.id = id;
+            this.startRow = startRow;
+            this.endRow = endRow;
+            this.barrier = barrier;
+            this.localCounts = localCounts;
+            this.steps = steps;
+            this.size = size;
+            this.sim = sim;
+            this.rnd = new Random(seed);
+        }
+
+        @Override
+        public void run() {
+            try {
+                for (int step = 0; step < steps; step++) {
+
+                    // update our rows and count locally
+                    for (int r = startRow; r < endRow; r++) {
+                        for (int c = 0; c < size; c++) {
+                            int newState = sim.updateCellRandom(r, c, sim.currentGrid, rnd);
+                            sim.nextGrid[r][c] = newState;
+                            localCounts[step][newState]++;
+                        }
+                    }
+
+                    // first barrier: workers + stats sync here
+                    barrier.await();
+
+                    // one thread does the swap
+                    if (id == 0) {
+                        synchronized (barrier) {
+                            sim.swapGrids();
+                        }
+                    }
+
+                    // second barrier: wait until swap done
+                    barrier.await();
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
+    }
+
+    // stats thread: aggregates local counts per step
+    private static class StatsTask implements Runnable {
+
+        private final long[][][] localCounts; // [thread][step][state]
+        private final long[][] globalCounts;  // [step][state]
+        private final StepBarrier barrier;
+        private final int steps;
+        private final int numThreads;
+
+        StatsTask(long[][][] localCounts,
+                  long[][] globalCounts,
+                  StepBarrier barrier,
+                  int steps,
+                  int numThreads) {
+
+            this.localCounts = localCounts;
+            this.globalCounts = globalCounts;
+            this.barrier = barrier;
+            this.steps = steps;
+            this.numThreads = numThreads;
+        }
+
+        @Override
+        public void run() {
+            try {
+                for (int step = 0; step < steps; step++) {
+                    // wait until workers finished this step
+                    barrier.await();
+
+                    long empty = 0;
+                    long tree = 0;
+                    long burning = 0;
+
+                    for (int t = 0; t < numThreads; t++) {
+                        empty   += localCounts[t][step][EMPTY];
+                        tree    += localCounts[t][step][TREE];
+                        burning += localCounts[t][step][BURNING];
+                    }
+
+                    globalCounts[step][EMPTY]   = empty;
+                    globalCounts[step][TREE]    = tree;
+                    globalCounts[step][BURNING] = burning;
+
+                    // wait again so workers do not start too early
+                    barrier.await();
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
+    }
+
     public static void main(String[] args) {
         int size = 50;
         int steps = 400;
@@ -132,9 +294,12 @@ public class ID25287575_Assignment2 {
         ID25287575_Assignment2 sim =
                 new ID25287575_Assignment2(size, steps, pGrow, pBurn);
 
+        int warmupRuns   = 1;
+        int measuredRuns = 5;
         long seed = 42L;
-        double t = sim.runSequentialOnceMs(seed);
-        System.out.printf("Sequential run took %.3f ms%n", t);
+
+        double seqTimeAvgMs = averageSequentialMs(sim, seed, warmupRuns, measuredRuns);
+        System.out.printf("Sequential average time: %.3f ms%n", seqTimeAvgMs);
     }
 
 }
