@@ -123,47 +123,64 @@ public class ID25287575_Assignment2 {
         return (tEnd - tStart) / 1_000_000.0;
     }
 
-    // average sequential: warmupruns warmup, then measuredruns runs
-    private static double averageSequentialMs(ID25287575_Assignment2 sim,
-                                              long seed,
-                                              int warmupRuns,
-                                              int measuredRuns) {
+    // one parallel run with numThreads workers + 1 stats task, returns time in ms
+    public double runParallelOnceMs(int numThreads, long seed) throws InterruptedException {
+        initialize(seed);
 
-        for (int i = 0; i < warmupRuns; i++) {
-            sim.runSequentialOnceMs(seed);
+        // barrier for all workers + stats thread
+        int parties = numThreads + 1;
+        StepBarrier barrier = new StepBarrier(parties);
+
+        // localCounts[thread][step][state]
+        long[][][] localCounts = new long[numThreads][steps][3];
+        // globalCounts[step][state] (not printed but used by stats task)
+        long[][] globalCounts = new long[steps][3];
+
+        Thread[] workers = new Thread[numThreads];
+
+        // block decomposition of rows
+        int baseRows = size / numThreads;
+        int extra = size % numThreads;
+        int startRow = 0;
+
+        for (int t = 0; t < numThreads; t++) {
+            int rows = baseRows + (t < extra ? 1 : 0);
+            int endRow = startRow + rows;
+
+            Worker worker = new Worker(
+                    t,
+                    startRow,
+                    endRow,
+                    barrier,
+                    localCounts[t],
+                    steps,
+                    size,
+                    this,
+                    2000L + t
+            );
+
+            workers[t] = new Thread(worker, "worker-" + t);
+            startRow = endRow;
         }
 
-        double sumMs = 0.0;
-        for (int i = 0; i < measuredRuns; i++) {
-            sumMs += sim.runSequentialOnceMs(seed);
-        }
-        return sumMs / measuredRuns;
-    }
+        // stats thread for task parallelism (aggregation)
+        StatsTask statsTask = new StatsTask(localCounts, globalCounts, barrier, steps, numThreads);
+        Thread statsThread = new Thread(statsTask, "stats");
 
-    // simple barrier built with synchronized + wait/notifyall
-    private static class StepBarrier {
+        long tStart = System.nanoTime();
 
-        private final int parties;
-        private int arrived = 0;
-        private int generation = 0;
-
-        StepBarrier(int parties) {
-            this.parties = parties;
+        statsThread.start();
+        for (Thread w : workers) {
+            w.start();
         }
 
-        public synchronized void await() throws InterruptedException {
-            int currentGen = generation;
-            arrived++;
-            if (arrived == parties) {
-                arrived = 0;
-                generation++;
-                notifyAll();
-            } else {
-                while (currentGen == generation) {
-                    wait();
-                }
-            }
+        for (Thread w : workers) {
+            w.join();
         }
+        statsThread.join();
+
+        long tEnd = System.nanoTime();
+        return (tEnd - tStart) / 1_000_000.0;
     }
 
     // worker: data-parallel update on a block of rows
@@ -285,64 +302,47 @@ public class ID25287575_Assignment2 {
         }
     }
 
-    // one parallel run with numThreads workers + 1 stats task, returns time in ms
-    public double runParallelOnceMs(int numThreads, long seed) throws InterruptedException {
-        initialize(seed);
+    // simple barrier built with synchronized + wait/notifyall
+    private static class StepBarrier {
 
-        // barrier for all workers + stats thread
-        int parties = numThreads + 1;
-        StepBarrier barrier = new StepBarrier(parties);
+        private final int parties;
+        private int arrived = 0;
+        private int generation = 0;
 
-        // localCounts[thread][step][state]
-        long[][][] localCounts = new long[numThreads][steps][3];
-        // globalCounts[step][state] (not printed but used by stats task)
-        long[][] globalCounts = new long[steps][3];
-
-        Thread[] workers = new Thread[numThreads];
-
-        // block decomposition of rows
-        int baseRows = size / numThreads;
-        int extra = size % numThreads;
-        int startRow = 0;
-
-        for (int t = 0; t < numThreads; t++) {
-            int rows = baseRows + (t < extra ? 1 : 0);
-            int endRow = startRow + rows;
-
-            Worker worker = new Worker(
-                    t,
-                    startRow,
-                    endRow,
-                    barrier,
-                    localCounts[t],
-                    steps,
-                    size,
-                    this,
-                    2000L + t
-            );
-
-            workers[t] = new Thread(worker, "worker-" + t);
-            startRow = endRow;
+        StepBarrier(int parties) {
+            this.parties = parties;
         }
 
-        // stats thread for task parallelism (aggregation)
-        StatsTask statsTask = new StatsTask(localCounts, globalCounts, barrier, steps, numThreads);
-        Thread statsThread = new Thread(statsTask, "stats");
+        public synchronized void await() throws InterruptedException {
+            int currentGen = generation;
+            arrived++;
+            if (arrived == parties) {
+                arrived = 0;
+                generation++;
+                notifyAll();
+            } else {
+                while (currentGen == generation) {
+                    wait();
+                }
+            }
+        }
+    }
 
-        long tStart = System.nanoTime();
+    // average sequential: warmupruns warmup, then measuredruns runs
+    private static double averageSequentialMs(ID25287575_Assignment2 sim,
+                                              long seed,
+                                              int warmupRuns,
+                                              int measuredRuns) {
 
-        statsThread.start();
-        for (Thread w : workers) {
-            w.start();
+        for (int i = 0; i < warmupRuns; i++) {
+            sim.runSequentialOnceMs(seed);
         }
 
-        for (Thread w : workers) {
-            w.join();
+        double sumMs = 0.0;
+        for (int i = 0; i < measuredRuns; i++) {
+            sumMs += sim.runSequentialOnceMs(seed);
         }
-        statsThread.join();
-
-        long tEnd = System.nanoTime();
-        return (tEnd - tStart) / 1_000_000.0;
+        return sumMs / measuredRuns;
     }
 
     // average parallel: warmupruns warmup, then measuredruns runs
@@ -363,11 +363,13 @@ public class ID25287575_Assignment2 {
         return sumMs / measuredRuns;
     }
 
+    // main: runs timing and prints analysis values
     public static void main(String[] args) throws InterruptedException {
-        int size = 50;
+        int size = 1000;
         int steps = 400;
         double pGrow = 0.01;
         double pBurn = 0.1;
+
 
         if (args.length >= 4) {
             size  = Integer.parseInt(args[0]);
@@ -400,6 +402,58 @@ public class ID25287575_Assignment2 {
         System.out.printf("%-3d %.3f%n", 1, seqTimeAvgMs);
         for (int i = 0; i < threadCounts.length; i++) {
             System.out.printf("%-3d %.3f%n", threadCounts[i], parTimeAvgMs[i]);
+        }
+
+        // measured speedup, efficiency, karp-flatt
+        double[] speedupMeasured = new double[threadCounts.length];
+        double[] efficiency = new double[threadCounts.length];
+        double[] epsilonKarpFlatt = new double[threadCounts.length];
+
+        System.out.println();
+        System.out.println("speedup, efficiency, karp-flatt:");
+        System.out.println("p   s(p)      e(p)      eps(p)");
+
+        for (int i = 0; i < threadCounts.length; i++) {
+            int P = threadCounts[i];
+            speedupMeasured[i] = seqTimeAvgMs / parTimeAvgMs[i];
+            efficiency[i] = speedupMeasured[i] / P;
+            epsilonKarpFlatt[i] =
+                    (1.0 / speedupMeasured[i] - 1.0 / P) / (1.0 - 1.0 / P);
+            System.out.printf(
+                    "%-3d %-9.3f %-9.3f %-10.5f%n",
+                    P,
+                    speedupMeasured[i],
+                    efficiency[i],
+                    epsilonKarpFlatt[i]
+            );
+        }
+
+        // estimate parallel fraction p (amdahl) using largest p
+        int Pref = threadCounts[threadCounts.length - 1];
+        double SrefMeasured = speedupMeasured[threadCounts.length - 1];
+        double pEstAmdahl =
+                (1.0 - 1.0 / SrefMeasured) / (1.0 - 1.0 / Pref);
+
+        System.out.println();
+        System.out.println("estimated parallel fraction (amdahl):");
+        System.out.printf("p_est ≈ %.4f%n", pEstAmdahl);
+
+        // theoretical amdahl and gustafson speedups
+        System.out.println();
+        System.out.println("theoretical speedup (amdahl & gustafson):");
+        System.out.println("p   s_amdahl   s_gustafson");
+
+        for (int P : threadCounts) {
+            double speedupAmdahlTheory =
+                    1.0 / ((1.0 - pEstAmdahl) + pEstAmdahl / P);
+            double speedupGustafsonTheory =
+                    (1.0 - pEstAmdahl) + pEstAmdahl * P;
+            System.out.printf(
+                    "%-3d %-10.3f %-12.3f%n",
+                    P,
+                    speedupAmdahlTheory,
+                    speedupGustafsonTheory
+            );
         }
     }
 
