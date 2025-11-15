@@ -285,11 +285,96 @@ public class ID25287575_Assignment2 {
         }
     }
 
-    public static void main(String[] args) {
+    // one parallel run with numThreads workers + 1 stats task, returns time in ms
+    public double runParallelOnceMs(int numThreads, long seed) throws InterruptedException {
+        initialize(seed);
+
+        // barrier for all workers + stats thread
+        int parties = numThreads + 1;
+        StepBarrier barrier = new StepBarrier(parties);
+
+        // localCounts[thread][step][state]
+        long[][][] localCounts = new long[numThreads][steps][3];
+        // globalCounts[step][state] (not printed but used by stats task)
+        long[][] globalCounts = new long[steps][3];
+
+        Thread[] workers = new Thread[numThreads];
+
+        // block decomposition of rows
+        int baseRows = size / numThreads;
+        int extra = size % numThreads;
+        int startRow = 0;
+
+        for (int t = 0; t < numThreads; t++) {
+            int rows = baseRows + (t < extra ? 1 : 0);
+            int endRow = startRow + rows;
+
+            Worker worker = new Worker(
+                    t,
+                    startRow,
+                    endRow,
+                    barrier,
+                    localCounts[t],
+                    steps,
+                    size,
+                    this,
+                    2000L + t
+            );
+
+            workers[t] = new Thread(worker, "worker-" + t);
+            startRow = endRow;
+        }
+
+        // stats thread for task parallelism (aggregation)
+        StatsTask statsTask = new StatsTask(localCounts, globalCounts, barrier, steps, numThreads);
+        Thread statsThread = new Thread(statsTask, "stats");
+
+        long tStart = System.nanoTime();
+
+        statsThread.start();
+        for (Thread w : workers) {
+            w.start();
+        }
+
+        for (Thread w : workers) {
+            w.join();
+        }
+        statsThread.join();
+
+        long tEnd = System.nanoTime();
+        return (tEnd - tStart) / 1_000_000.0;
+    }
+
+    // average parallel: warmupruns warmup, then measuredruns runs
+    private static double averageParallelMs(ID25287575_Assignment2 sim,
+                                            int numThreads,
+                                            long seed,
+                                            int warmupRuns,
+                                            int measuredRuns) throws InterruptedException {
+
+        for (int i = 0; i < warmupRuns; i++) {
+            sim.runParallelOnceMs(numThreads, seed);
+        }
+
+        double sumMs = 0.0;
+        for (int i = 0; i < measuredRuns; i++) {
+            sumMs += sim.runParallelOnceMs(numThreads, seed);
+        }
+        return sumMs / measuredRuns;
+    }
+
+    public static void main(String[] args) throws InterruptedException {
         int size = 50;
         int steps = 400;
         double pGrow = 0.01;
         double pBurn = 0.1;
+
+        if (args.length >= 4) {
+            size  = Integer.parseInt(args[0]);
+            steps = Integer.parseInt(args[1]);
+            pGrow = Double.parseDouble(args[2]);
+            pBurn = Double.parseDouble(args[3]);
+        }
 
         ID25287575_Assignment2 sim =
                 new ID25287575_Assignment2(size, steps, pGrow, pBurn);
@@ -298,8 +383,24 @@ public class ID25287575_Assignment2 {
         int measuredRuns = 5;
         long seed = 42L;
 
+        // timing sequential
         double seqTimeAvgMs = averageSequentialMs(sim, seed, warmupRuns, measuredRuns);
-        System.out.printf("Sequential average time: %.3f ms%n", seqTimeAvgMs);
+
+        // timing parallel
+        int[] threadCounts = {2, 4, 8};
+        double[] parTimeAvgMs = new double[threadCounts.length];
+
+        for (int i = 0; i < threadCounts.length; i++) {
+            parTimeAvgMs[i] = averageParallelMs(sim, threadCounts[i], seed, warmupRuns, measuredRuns);
+        }
+
+        System.out.println();
+        System.out.println("timing (ms, average):");
+        System.out.println("p   t(p)");
+        System.out.printf("%-3d %.3f%n", 1, seqTimeAvgMs);
+        for (int i = 0; i < threadCounts.length; i++) {
+            System.out.printf("%-3d %.3f%n", threadCounts[i], parTimeAvgMs[i]);
+        }
     }
 
 }
