@@ -3,7 +3,7 @@
  * student id: 25287575
  * name: ismail bahlaoui
  *
- * forest fire simulation for cs5741 assignment 2.
+ * forest fire simulation for assignment 2.
  */
 
 import java.util.Random;
@@ -15,9 +15,9 @@ public class ID25287575_Assignment2 {
     private static final int TREE    = 1;
     private static final int BURNING = 2;
 
-    // simulation settings
-    private final int size;   // grid is size x size
-    private final int steps;  // number of time steps
+    // simulation settings are changeable from main :D
+    private final int size;
+    private final int steps;
     private final double pGrow;
     private final double pBurn;
 
@@ -34,7 +34,7 @@ public class ID25287575_Assignment2 {
         this.nextGrid = new int[size][size];
     }
 
-    // init forest with trees and some burning cells
+    // initialize forest with trees and some burning cells
     public void initialize(long seed) {
         Random rnd = new Random(seed);
         for (int r = 0; r < size; r++) {
@@ -59,7 +59,7 @@ public class ID25287575_Assignment2 {
         nextGrid = tmp;
     }
 
-    // check if cell has at least one burning neighbour (8-neighbourhood, torus)
+    // check if cell has at least one burning neighbour
     private boolean hasBurningNeighbour(int row, int col, int[][] grid) {
         for (int dr = -1; dr <= 1; dr++) {
             for (int dc = -1; dc <= 1; dc++) {
@@ -102,7 +102,7 @@ public class ID25287575_Assignment2 {
         return EMPTY;
     }
 
-    // one sequential run, returns time in ms
+    // one sequential run
     public double runSequentialOnceMs(long seed) {
         initialize(seed);
         Random rnd = new Random(1234L);
@@ -123,7 +123,7 @@ public class ID25287575_Assignment2 {
         return (tEnd - tStart) / 1_000_000.0;
     }
 
-    // one parallel run with numThreads workers + 1 stats task, returns time in ms
+    // one parallel run with numThreads workers + 1 stats task
     public double runParallelOnceMs(int numThreads, long seed) throws InterruptedException {
         initialize(seed);
 
@@ -133,7 +133,7 @@ public class ID25287575_Assignment2 {
 
         // localCounts[thread][step][state]
         long[][][] localCounts = new long[numThreads][steps][3];
-        // globalCounts[step][state] (not printed but used by stats task)
+        // globalCounts[step][state] (used by stats task)
         long[][] globalCounts = new long[steps][3];
 
         Thread[] workers = new Thread[numThreads];
@@ -163,7 +163,7 @@ public class ID25287575_Assignment2 {
             startRow = endRow;
         }
 
-        // stats thread for task parallelism (aggregation)
+        // stats thread for task parallelism
         StatsTask statsTask = new StatsTask(localCounts, globalCounts, barrier, steps, numThreads);
         Thread statsThread = new Thread(statsTask, "stats");
 
@@ -183,14 +183,14 @@ public class ID25287575_Assignment2 {
         return (tEnd - tStart) / 1_000_000.0;
     }
 
-    // worker: data-parallel update on a block of rows
+    // data-parallel update on a block of rows
     private static class Worker implements Runnable {
 
         private final int id;
         private final int startRow;
         private final int endRow;
         private final StepBarrier barrier;
-        private final long[][] localCounts; // [step][state]
+        private final long[][] localCounts;
         private final int steps;
         private final int size;
         private final ID25287575_Assignment2 sim;
@@ -222,7 +222,7 @@ public class ID25287575_Assignment2 {
             try {
                 for (int step = 0; step < steps; step++) {
 
-                    // update our rows and count locally
+                    // update rows and count locally
                     for (int r = startRow; r < endRow; r++) {
                         for (int c = 0; c < size; c++) {
                             int newState = sim.updateCellRandom(r, c, sim.currentGrid, rnd);
@@ -250,11 +250,11 @@ public class ID25287575_Assignment2 {
         }
     }
 
-    // stats thread: aggregates local counts per step
+    // stats thread: aggrgate local counts per step
     private static class StatsTask implements Runnable {
 
-        private final long[][][] localCounts; // [thread][step][state]
-        private final long[][] globalCounts;  // [step][state]
+        private final long[][][] localCounts;
+        private final long[][] globalCounts;
         private final StepBarrier barrier;
         private final int steps;
         private final int numThreads;
@@ -276,7 +276,7 @@ public class ID25287575_Assignment2 {
         public void run() {
             try {
                 for (int step = 0; step < steps; step++) {
-                    // wait until workers finished this step
+                    // wait until workers finish this step
                     barrier.await();
 
                     long empty = 0;
@@ -293,7 +293,7 @@ public class ID25287575_Assignment2 {
                     globalCounts[step][TREE]    = tree;
                     globalCounts[step][BURNING] = burning;
 
-                    // wait again so workers do not start too early
+                    // wait again so workers dont start too early
                     barrier.await();
                 }
             } catch (InterruptedException e) {
@@ -328,7 +328,7 @@ public class ID25287575_Assignment2 {
         }
     }
 
-    // average sequential: warmupruns warmup, then measuredruns runs
+    // average sequential
     private static double averageSequentialMs(ID25287575_Assignment2 sim,
                                               long seed,
                                               int warmupRuns,
@@ -345,7 +345,7 @@ public class ID25287575_Assignment2 {
         return sumMs / measuredRuns;
     }
 
-    // average parallel: warmupruns warmup, then measuredruns runs
+    // average parallel
     private static double averageParallelMs(ID25287575_Assignment2 sim,
                                             int numThreads,
                                             long seed,
@@ -363,7 +363,7 @@ public class ID25287575_Assignment2 {
         return sumMs / measuredRuns;
     }
 
-    // main: runs timing and prints analysis values
+    // runs timing and print values
     public static void main(String[] args) throws InterruptedException {
         int size = 1000;
         int steps = 400;
@@ -385,10 +385,8 @@ public class ID25287575_Assignment2 {
         int measuredRuns = 5;
         long seed = 42L;
 
-        // timing sequential
         double seqTimeAvgMs = averageSequentialMs(sim, seed, warmupRuns, measuredRuns);
 
-        // timing parallel
         int[] threadCounts = {2, 4, 8};
         double[] parTimeAvgMs = new double[threadCounts.length];
 
@@ -404,7 +402,6 @@ public class ID25287575_Assignment2 {
             System.out.printf("%-3d %.3f%n", threadCounts[i], parTimeAvgMs[i]);
         }
 
-        // measured speedup, efficiency, karp-flatt
         double[] speedupMeasured = new double[threadCounts.length];
         double[] efficiency = new double[threadCounts.length];
         double[] epsilonKarpFlatt = new double[threadCounts.length];
@@ -428,7 +425,6 @@ public class ID25287575_Assignment2 {
             );
         }
 
-        // estimate parallel fraction p (amdahl) using largest p
         int Pref = threadCounts[threadCounts.length - 1];
         double SrefMeasured = speedupMeasured[threadCounts.length - 1];
         double pEstAmdahl =
@@ -438,7 +434,6 @@ public class ID25287575_Assignment2 {
         System.out.println("estimated parallel fraction (amdahl):");
         System.out.printf("p_est ≈ %.4f%n", pEstAmdahl);
 
-        // theoretical amdahl and gustafson speedups
         System.out.println();
         System.out.println("theoretical speedup (amdahl & gustafson):");
         System.out.println("p   s_amdahl   s_gustafson");
