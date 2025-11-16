@@ -1,6 +1,5 @@
 # CS5741 Assignment 2 – Forest Fire Simulation
-
-Author: **Ismail Bahlaoui (ID25287575)**  
+ 
 Module: **CS5741 – Concurrency & Parallelism**
 
 This project implements a 2D forest fire simulation in Java, including a sequential baseline and a parallel version that uses data parallelism (row-block workers) and task parallelism (a statistics thread).  
